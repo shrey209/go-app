@@ -1,0 +1,55 @@
+name: Build and Deploy Go App with GitOps
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.vars.outputs.TAG }}
+    steps:
+      - name: Checkout application repo
+        uses: actions/checkout@v3
+
+      - name: Set timestamp tag
+        id: vars
+        run: echo "TAG=$(date +%Y%m%d%H%M%S)" >> $GITHUB_OUTPUT
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        run: |
+          docker build -t shrey209/go-app:${{ steps.vars.outputs.TAG }} .
+          docker push shrey209/go-app:${{ steps.vars.outputs.TAG }}
+
+  update-gitops:
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone GitOps repo
+        uses: actions/checkout@v3
+        with:
+          repository: shrey209/Git-ops        
+          token: ${{ secrets.GITOPS_TOKEN }}
+          path: gitops
+
+      - name: Update deployment2.yml with new image tag
+        run: |
+          cd gitops
+          sed -i "s|image: shrey209/go-app:.*|image: shrey209/go-app:${{ needs.build-and-push.outputs.tag }}|" deployment2.yml
+
+      - name: Commit and push changes
+        run: |
+          cd gitops
+          git config user.name "GitOps Bot"
+          git config user.email "bot@github.com"
+          git add deployment2.yml
+          git commit -m "Update go-app image to tag ${{ needs.build-and-push.outputs.tag }}"
+          git push origin main
